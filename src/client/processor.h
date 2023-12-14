@@ -2,7 +2,7 @@
 
 #include <QObject>
 
-#include "../lib/clientinterface.h"
+#include "../interface-lib/clientinterface.h"
 
 class Processor : public QObject
 {
