@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 2.8.12)
+
+project(generic_netlink_server)
+
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(CMAKE_AUTOMOC ON)
+set(LIBRARIES generic_netlink_lib Qt5::Core)
+
+FILE(GLOB_RECURSE HEADER_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.h*)
+FILE(GLOB_RECURSE SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.c*)
+
+add_executable(${PROJECT_NAME} ${HEADER_FILES} ${SOURCE_FILES})
+
+target_link_libraries(${PROJECT_NAME} ${LIBRARIES})
+
