@@ -1,4 +1,8 @@
-#include <iostream>
+#include <QCoreApplication>
+#include <QDebug>
+#include <QJsonObject>
+#include <QJsonDocument>
+
 #include <sys/types.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -14,62 +18,78 @@
 #define MAX_PAYLOAD 1024
 
 int fd;
-sockaddr_nl src_addr;
-sockaddr_nl dest_addr;
-nlmsghdr* nlh = nullptr;
+sockaddr_nl src_addr, dest_addr;
 iovec iov;
+nlmsghdr* nlh = nullptr;
 msghdr msg;
 
-int main()
+int main(int argc, char* argv[])
 {
+    QCoreApplication app(argc, argv);
+    qDebug() << "Start client";
+
+    // Открываю сокет протокол NETLINK_GENERIC
     fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
-    std::cout << "Start client";
     if (fd < 0)
     {
-        std::cout << "Create socket failed";
+        qCritical() << "Create socket failed";
         return -1;
     }
 
+    // Заполняем структуру нашего локального адреса
     memset(&src_addr, 0, sizeof(src_addr));
     src_addr.nl_family = AF_NETLINK;
-    src_addr.nl_pid = 1;
     src_addr.nl_groups = 0;
+    src_addr.nl_pid = 10000;
 
-    // привязываем сокет к уникальному адресу
+    // Привязываем сокет к локальному адресу
     if (bind(fd, reinterpret_cast<sockaddr*>(&src_addr), sizeof(src_addr)) < 0)
     {
-        std::cout << "Binding socket failed";
+        qCritical() << "Binding socket failed";
         return -1;
     }
 
-    // выделяем буфер для сообщения netlink, которое является заголовком сообщения + полезной нагрузкой сообщения
+    // Заполним сообщение с заголовком(размер заголовка + максимальная нагрузка)
     nlh = reinterpret_cast<nlmsghdr*>(malloc(NLMSG_SPACE(MAX_PAYLOAD)));
-
     memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
     nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
-    nlh->nlmsg_pid = 1;
+    nlh->nlmsg_pid = src_addr.nl_pid;
     nlh->nlmsg_flags = 0;
 
-    strcpy(reinterpret_cast<char*>(NLMSG_DATA(nlh)), "Hello world!");
+    // Составляем запрос серверу в виде Json
+    QJsonObject request;
+    request["action"] = "plus";
+    request["arg_1"] = 1;
+    request["arg_2"] = 2;
 
-    iov.iov_base = &nlh;
-    iov.iov_len = nlh->nlmsg_len;
+    //Добавляем запрос в полезную нагрузку
+    strcpy(reinterpret_cast<char*>(NLMSG_DATA(nlh)), QJsonDocument(request).toJson().constData());
 
-    memset(&dest_addr, 0, sizeof(dest_addr));
+    //Далее заполняем структуру для ввода-вывода
+    iov.iov_base = reinterpret_cast<void*>(nlh);  // базовый адрес заголовка сообщения netlink
+    iov.iov_len = nlh->nlmsg_len;                 // длина сообщения по сетевой ссылке
+
+    // Заполняем структуру адреса сервера
     dest_addr.nl_family = AF_NETLINK;
-    dest_addr.nl_pid = 2;
+    dest_addr.nl_pid = 10001;
     dest_addr.nl_groups = 0;
 
-    msg.msg_name = &dest_addr;
-    msg.msg_namelen = sizeof(dest_addr);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
+    // заполняем структуру, описывающую сообщения, отправленные "sendmsg" и полученные "recvmsg"
+    msg.msg_name = (void*)&dest_addr;     // Адрес для отправки / получения с него.
+    msg.msg_namelen = sizeof(dest_addr);  // Длина адресных данных.
+    msg.msg_iov = &iov;                   // Массив данных для отправки/получения.
+    msg.msg_iovlen = 1;                   // В нашем случае всего 1 элемент в массиве
 
     while (true)
     {
-        sendmsg(fd, &msg, 0);
-        std::cout << "Send message" << (char*)NLMSG_DATA(nlh);
+        int bytes = sendmsg(fd, &msg, 0);
+        if (bytes < 0)
+        {
+            qCritical() << "Sending failed";
+            continue;
+        }
+        qDebug() << "Send request" << (char*)NLMSG_DATA(nlh);
     }
-    close(fd);
-    return 0;
+
+    return app.exec();
 }
