@@ -1,4 +1,4 @@
-#include <QCoreApplication>
+﻿#include <QCoreApplication>
 #include <QDebug>
 #include <QJsonObject>
 #include <QJsonDocument>
@@ -28,11 +28,14 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
     qDebug() << "Start client";
 
+    const int pidClient = 3;
+    const int pidServer = 4;
+
     // Открываю сокет протокол NETLINK_GENERIC
     fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
     if (fd < 0)
     {
-        qCritical() << "Create socket failed";
+        perror("socket()");
         return -1;
     }
 
@@ -40,12 +43,13 @@ int main(int argc, char* argv[])
     memset(&src_addr, 0, sizeof(src_addr));
     src_addr.nl_family = AF_NETLINK;
     src_addr.nl_groups = 0;
-    src_addr.nl_pid = 10000;
+    src_addr.nl_pid = pidClient;
 
     // Привязываем сокет к локальному адресу
     if (bind(fd, reinterpret_cast<sockaddr*>(&src_addr), sizeof(src_addr)) < 0)
     {
-        qCritical() << "Binding socket failed";
+        perror("bind()");
+        close(fd);
         return -1;
     }
 
@@ -71,7 +75,7 @@ int main(int argc, char* argv[])
 
     // Заполняем структуру адреса сервера
     dest_addr.nl_family = AF_NETLINK;
-    dest_addr.nl_pid = 10001;
+    dest_addr.nl_pid = pidServer;
     dest_addr.nl_groups = 0;
 
     // заполняем структуру, описывающую сообщения, отправленные "sendmsg" и полученные "recvmsg"
@@ -80,16 +84,29 @@ int main(int argc, char* argv[])
     msg.msg_iov = &iov;                   // Массив данных для отправки/получения.
     msg.msg_iovlen = 1;                   // В нашем случае всего 1 элемент в массиве
 
-    while (true)
+    sleep(3);
+    // Отправляем запрос серверу
+    int bytes = sendmsg(fd, &msg, 0);
+    if (bytes < 0)
     {
-        int bytes = sendmsg(fd, &msg, 0);
-        if (bytes < 0)
-        {
-            qCritical() << "Sending failed";
-            continue;
-        }
-        qDebug() << "Send request" << (char*)NLMSG_DATA(nlh);
+        perror("sendmsg()");
+        return -1;
     }
 
+    // Далее ждем ответ сервера
+    qDebug() << "Wait server";
+    recvmsg(fd, &msg, 0);
+    QJsonObject respond = QJsonDocument::fromJson(reinterpret_cast<char*>(NLMSG_DATA(nlh))).object();
+    if (respond.contains("result"))
+    {
+        // Тут совершаются какие то действия над результатом сервера
+        qDebug() << respond.value("result").toInt();
+    }
+    else
+    {
+        qCritical() << "Result not found";
+    }
+
+    close(fd);
     return app.exec();
 }
